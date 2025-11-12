@@ -1,0 +1,4 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/shiki/.venv/bin/python",
+    "python.terminal.activateEnvironment": true
+}

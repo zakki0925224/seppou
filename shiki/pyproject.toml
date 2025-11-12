@@ -1,0 +1,13 @@
+[project]
+name = "shiki"
+version = "0.1.0"
+description = "Generates emotional text using LLMs based on system data, transforming technical states into human-relatable expressions."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.121.1",
+    "langchain-core>=1.0.4",
+    "langchain-google-genai>=3.0.2",
+    "langchain-openai>=1.0.2",
+    "langserve[all]>=0.3.3",
+    "python-dotenv>=1.2.1",
+]
