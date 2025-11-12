@@ -10,6 +10,22 @@ Acquires real-time data from target systems. Currently implemented as a custom C
 
 Generates emotional text using LLMs based on system data, transforming technical states into human-relatable expressions.
 
+### Usage
+
+```bash
+cd shiki
+uv sync
+uv run main.py
+```
+
 ## zen ("禅")
 
 Provides an SNS-style interface that visualizes the generated emotional expressions in real-time, bridging technical data and human understanding.
+
+### Usage
+
+```bash
+cd zen
+bun install
+bun start
+```

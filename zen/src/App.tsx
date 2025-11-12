@@ -1,8 +1,5 @@
-import { Col, Flex, Layout, Row } from "antd";
-import Chat from "./Chat";
+import { Flex } from "antd";
 import TimeLine, { type TweetData } from "./TimeLine";
-
-const { Header, Footer, Content } = Layout;
 
 const sampleTweets: TweetData[] = [
     { user: { name: "abc", username: "def" }, content: "ghijk", detail: "lmnop", timestamp: new Date() },
@@ -13,16 +10,7 @@ const sampleTweets: TweetData[] = [
 export const App = () => {
     return (
         <Flex gap="middle" wrap>
-            <Layout>
-                <Header>Header</Header>
-                <Content>
-                    <Row>
-                        <Col span={18}><Chat /></Col>
-                        <Col span={6}><TimeLine tweets={sampleTweets} /></Col>
-                    </Row>
-                </Content>
-                <Footer>Footer</Footer>
-            </Layout>
+            <TimeLine tweets={sampleTweets} />
         </Flex>
     );
 }
