@@ -10,4 +10,5 @@ dependencies = [
     "langchain-openai>=1.0.2",
     "langserve[all]>=0.3.3",
     "python-dotenv>=1.2.1",
+    "tinydb>=4.8.2",
 ]
