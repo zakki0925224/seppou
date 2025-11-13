@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 from dotenv import load_dotenv
 from llm import create_llm_interface
 from db import DataBase
@@ -52,20 +53,38 @@ llm = create_llm_interface(
 
 app.state.db = DataBase(db_path="db.json")
 
+# create retrievers for RAG
+log_retriever = app.state.db.get_log_retriever(k=3)
+tweet_retriever = app.state.db.get_tweet_retriever(k=3)
+
+
+def format_docs(docs):
+    if not docs:
+        return "No similar past data found."
+    return "\n\n".join([f"- {doc.page_content}" for doc in docs])
+
+
+# build RAG chain with retrievers
 tweet_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", CUSTOM_INSTS_TWEET),
-        ("user", "log:{log}\nsummarized_logs:{summarized_logs}"),
+        (
+            "user",
+            "Current log: {log}\n\nSimilar past logs:\n{past_logs}\n\nSimilar past reactions:\n{past_tweets}",
+        ),
     ]
 )
 
-# summarize_prompt = ChatPromptTemplate.from_messages(
-#     [("system", CUSTOM_INSTS_SUMMARIZE_LOG), ("user", "{log_chunk}")]
-# )
-
-tweet_chain = tweet_prompt | llm | StrOutputParser()
-# summarize_chain = summarize_prompt | llm | StrOutputParser()
-
+tweet_chain = (
+    {
+        "log": RunnablePassthrough(),
+        "past_logs": log_retriever | format_docs,
+        "past_tweets": tweet_retriever | format_docs,
+    }
+    | tweet_prompt
+    | llm
+    | StrOutputParser()
+)
 
 debug_router = create_debug_router(llm)
 app.include_router(debug_router)

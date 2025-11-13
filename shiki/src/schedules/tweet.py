@@ -10,19 +10,11 @@ def generate_tweet_from_latest_log(db: DataBase, tweet_llm_chain: Runnable):
     if not latest_log:
         return
 
-    # delete latest log from db
-    if not db.remove_log(latest_log.doc_id):
-        print(f"Failed to remove log with id {latest_log.doc_id}")
-        return
+    log_id = latest_log.doc_id
 
     try:
-        tweet = tweet_llm_chain.invoke(
-            {
-                "log": latest_log["log"],
-                "summarized_logs": "",
-            }
-        )
-        db.add_tweet(tweet)
+        tweet = tweet_llm_chain.invoke(latest_log["log"])
+        db.add_tweet(tweet, log_ids=[log_id])
 
     except Exception as e:
         print(f"Error generating tweet: {e}")
@@ -36,6 +28,8 @@ def start_tweet_scheduler(
         "interval",
         seconds=interval_seconds,
         args=[db, tweet_llm_chain],
+        max_instances=1,  # do not overlap
+        coalesce=True,
     )
     scheduler.start()
 

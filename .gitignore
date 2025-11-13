@@ -45,3 +45,4 @@ wheels/
 .venv
 
 db.json
+chroma_db/
