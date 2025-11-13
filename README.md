@@ -15,7 +15,7 @@ Generates emotional text using LLMs based on system data, transforming technical
 ```bash
 cd shiki
 uv sync
-uv run main.py
+uv run src/main.py
 ```
 
 ## zen ("禅")
