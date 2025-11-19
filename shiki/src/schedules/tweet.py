@@ -1,20 +1,42 @@
 from langchain_core.runnables import Runnable
+from langchain_core.callbacks.base import BaseCallbackHandler
 from apscheduler.schedulers.background import BackgroundScheduler
 from db import DataBase
+import time
 
 scheduler = BackgroundScheduler()
 
 
+class PromptCaptureCallback(BaseCallbackHandler):
+    def __init__(self):
+        self.prompts = ""
+
+    def on_llm_start(self, serialized, prompts, **kwargs):
+        self.prompts = "\n".join(prompts)
+
+
+callback = PromptCaptureCallback()
+
+
 def generate_tweet_from_latest_log(db: DataBase, tweet_llm_chain: Runnable):
-    latest_log = db.get_latest_log()
-    if not latest_log:
+    latest_logs = db.get_latest_logs()
+    if not latest_logs:
         return
 
-    log_id = latest_log.doc_id
+    log_ids = [x.doc_id for x in latest_logs]
+
+    formatted_logs = []
+    for log in latest_logs:
+        formatted_logs.append(log.get("log", ""))
 
     try:
-        tweet = tweet_llm_chain.invoke(latest_log["log"])
-        db.add_tweet(tweet, log_ids=[log_id])
+        start = time.perf_counter_ns()
+        tweet = tweet_llm_chain.invoke(
+            "\n".join(formatted_logs), config={"callbacks": [callback]}
+        )
+        end = time.perf_counter_ns()
+        generate_ms = int((end - start) / 1000000)
+        db.add_tweet(tweet, callback.prompts, generate_ms, log_ids)
 
     except Exception as e:
         print(f"Error generating tweet: {e}")

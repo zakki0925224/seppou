@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -8,6 +9,7 @@ from llm import create_llm_interface
 from db import DataBase
 from routers.debug import create_debug_router
 from routers.log import router as log_router
+from routers.tweet import router as tweet_router
 from schedules.tweet import start_tweet_scheduler, stop_tweet_scheduler
 import uvicorn
 import os
@@ -41,6 +43,14 @@ app = FastAPI(
     version="0.1.0",
     description="Generates emotional text using LLMs based on system data, transforming technical states into human-relatable expressions.",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 llm = create_llm_interface(
@@ -89,6 +99,7 @@ tweet_chain = (
 debug_router = create_debug_router(llm)
 app.include_router(debug_router)
 app.include_router(log_router)
+app.include_router(tweet_router)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="localhost", port=8000)

@@ -126,7 +126,7 @@ const Tweet = ({ user, content, detail, timestamp }: Readonly<TweetData>) => {
             >
                 <Panel
                     key="detail"
-                    header={<Text type="secondary" style={{ fontSize: "14px" }}>詳細を表示</Text>}
+                    header={<Text type="secondary" style={{ fontSize: "14px" }}>Prompts</Text>}
                     showArrow={true}
                     style={{
                         border: "none",

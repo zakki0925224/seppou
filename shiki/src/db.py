@@ -89,6 +89,9 @@ class DataBase:
         self.logs = self.db.table("logs")
         self.tweets = self.db.table("tweets")
 
+        self.latest_seen_log_id = 0
+        self.latest_seen_tweet_id = 0
+
         # ChromaDB for vector search
         self.chroma_client = chromadb.PersistentClient(path=chroma_path)
         self.log_collection = self.chroma_client.get_or_create_collection(
@@ -127,13 +130,16 @@ class DataBase:
 
         return data
 
-    def get_latest_log(self) -> Optional[Dict]:
+    def get_latest_logs(self) -> List[Dict]:
         all_logs = self.logs.all()
-        if not all_logs:
-            return None
+        new_logs = [log for log in all_logs if log.doc_id > self.latest_seen_log_id]
 
-        latest_log = max(all_logs, key=lambda log: log["timestamp"])
-        return latest_log
+        if not new_logs:
+            return []
+
+        new_logs.sort(key=lambda x: x.doc_id)
+        self.latest_seen_log_id = new_logs[-1].doc_id
+        return new_logs
 
     def remove_log(self, doc_id: int) -> bool:
         result = self.logs.remove(doc_ids=[doc_id])
@@ -145,9 +151,17 @@ class DataBase:
         return len(result) > 0
 
     # tweets DB with vector store
-    def add_tweet(self, tweet: str, log_ids: Optional[list[int]] = None) -> Dict:
+    def add_tweet(
+        self,
+        tweet: str,
+        prompts: str,
+        generate_ms: int,
+        log_ids: Optional[list[int]] = None,
+    ) -> Dict:
         data = {
             "tweet": tweet,
+            "prompts": prompts,
+            "generate_ms": generate_ms,
             "timestamp": datetime.now().isoformat(),
             "log_ids": log_ids or [],
         }
@@ -164,10 +178,16 @@ class DataBase:
 
     def get_latest_tweet(self) -> Optional[Dict]:
         all_tweets = self.tweets.all()
-        if not all_tweets:
+        new_tweets = [
+            log for log in all_tweets if log.doc_id > self.latest_seen_tweet_id
+        ]
+
+        if not new_tweets:
             return None
 
-        latest_tweet = max(all_tweets, key=lambda tweet: tweet["timestamp"])
+        new_tweets.sort(key=lambda x: x.doc_id)
+        latest_tweet = new_tweets[0]
+        self.latest_seen_tweet_id = latest_tweet.doc_id
         return latest_tweet
 
     def remove_tweet(self, doc_id: int) -> bool:
