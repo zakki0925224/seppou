@@ -4,7 +4,14 @@
 
 ## engi ("縁起")
 
-Acquires real-time data from target systems. Currently implemented as a custom CPU simulator.
+A reverse proxy server. It acts as a gateway, forwarding requests between the frontend and the `shiki` backend, and serves as an aggregation point for system logs.
+
+### Usage
+
+```bash
+cd engi
+go run main.go
+```
 
 ## shiki ("識")
 

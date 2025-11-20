@@ -12,7 +12,7 @@ export const App = () => {
     useEffect(() => {
         const fetchLatestTweet = async () => {
             try {
-                const response = await fetch(`${SHIKI_API_URL}/tweet`);
+                const response = await fetch(`${SHIKI_API_URL}/tweet/`);
                 if (response.ok) {
                     const result = await response.json();
                     const data = result.data;
