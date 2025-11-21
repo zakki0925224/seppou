@@ -174,21 +174,31 @@ class DataBase:
             metadatas=[{"timestamp": data["timestamp"], "log_ids": str(log_ids or [])}],
         )
 
+        data["doc_id"] = doc_id
         return data
 
-    def get_latest_tweet(self) -> Optional[Dict]:
+    def get_all_tweets(self) -> List[Dict]:
         all_tweets = self.tweets.all()
-        new_tweets = [
-            log for log in all_tweets if log.doc_id > self.latest_seen_tweet_id
-        ]
 
-        if not new_tweets:
-            return None
+        result = []
+        for tweet in all_tweets:
+            tweet_data = dict(tweet)
+            tweet_data["doc_id"] = tweet.doc_id
+            result.append(tweet_data)
+        return result
+
+    def get_tweets_after(self, after_id: int = 0) -> List[Dict]:
+        all_tweets = self.tweets.all()
+        new_tweets = [t for t in all_tweets if t.doc_id > after_id]
 
         new_tweets.sort(key=lambda x: x.doc_id)
-        latest_tweet = new_tweets[0]
-        self.latest_seen_tweet_id = latest_tweet.doc_id
-        return latest_tweet
+        # Ensure doc_id is included in the returned data
+        result = []
+        for tweet in new_tweets:
+            tweet_data = dict(tweet)
+            tweet_data["doc_id"] = tweet.doc_id
+            result.append(tweet_data)
+        return result
 
     def remove_tweet(self, doc_id: int) -> bool:
         result = self.tweets.remove(doc_ids=[doc_id])

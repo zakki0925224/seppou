@@ -12,6 +12,8 @@ class LogRequest(BaseModel):
 @router.post("/")
 async def post_log(request: Request, log_request: LogRequest):
     db: DataBase = request.app.state.db
-    data = db.add_log(log_request.content)
+    content = log_request.content
+    print(f'Received log: "{content}"')
+    data = db.add_log(content)
 
     return {"status": "success", "data": data}

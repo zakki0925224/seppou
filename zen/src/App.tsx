@@ -7,40 +7,39 @@ const POLLING_INTERVAL = 10000;
 
 export const App = () => {
     const [tweets, setTweets] = useState<TweetData[]>([]);
-    const [lastTimestamp, setLastTimestamp] = useState<string | null>(null);
 
     useEffect(() => {
-        const fetchLatestTweet = async () => {
+        const fetchAllTweets = async () => {
             try {
                 const response = await fetch(`${SHIKI_API_URL}/tweet/`);
-                if (response.ok) {
-                    const result = await response.json();
-                    const data = result.data;
+                if (!response.ok) return;
 
-                    if (data.timestamp !== lastTimestamp) {
-                        const newTweet: TweetData = {
-                            user: {
-                                name: "Shiki",
-                                username: "shiki_bot",
-                            },
-                            content: data.tweet,
-                            detail: `Thinking: ${data.generate_ms}ms\n${data.prompts}`,
-                            timestamp: new Date(data.timestamp),
-                        };
+                const result = await response.json();
+                const dataList = result.data;
 
-                        setTweets((prev) => [newTweet, ...prev]);
-                        setLastTimestamp(data.timestamp);
-                    }
+                if (Array.isArray(dataList)) {
+                    const fetchedTweets: TweetData[] = dataList.map((data: any) => ({
+                        id: data.doc_id,
+                        user: {
+                            name: "Shiki",
+                            username: "shiki_bot",
+                        },
+                        content: data.tweet,
+                        detail: `Thinking: ${data.generate_ms}ms\n${data.prompts}`,
+                        timestamp: new Date(data.timestamp),
+                    }));
+
+                    setTweets(fetchedTweets.toReversed());
                 }
             } catch (error) {
-                console.error("Failed to fetch tweet:", error);
+                console.error("Failed to fetch tweets:", error);
             }
         };
 
-        fetchLatestTweet();
-        const interval = setInterval(fetchLatestTweet, POLLING_INTERVAL);
+        fetchAllTweets();
+        const interval = setInterval(fetchAllTweets, POLLING_INTERVAL);
         return () => clearInterval(interval);
-    }, [lastTimestamp]);
+    }, []);
 
     return (
         <Flex gap="middle" wrap>

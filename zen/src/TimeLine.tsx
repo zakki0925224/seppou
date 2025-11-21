@@ -12,6 +12,7 @@ export interface User {
 }
 
 export interface TweetData {
+    id: number;
     user: User;
     content: string;
     detail: string;
@@ -183,7 +184,7 @@ export const TimeLine = ({ tweets }: Readonly<{ tweets: TweetData[] }>) => {
             >
                 <div style={{ display: "flex", flexDirection: "column" }}>
                     {tweets.map((tweet) => (
-                        <Tweet key={`${tweet.user.username}-${tweet.timestamp.getTime()}`} {...tweet} />
+                        <Tweet key={tweet.id} {...tweet} />
                     ))}
                 </div>
             </div>

@@ -13,17 +13,31 @@ from routers.tweet import router as tweet_router
 from schedules.tweet import start_tweet_scheduler, stop_tweet_scheduler
 import uvicorn
 import os
+import toml
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_MODEL = os.getenv("GOOGLE_MODEL")
 LOCAL_MODEL = os.getenv("LOCAL_MODEL")
 LOCAL_BASE_URL = os.getenv("LOCAL_BASE_URL")
-CUSTOM_INSTS_TWEET = os.getenv("CUSTOM_INSTS_TWEET")
-CUSTOM_INSTS_SUMMARIZE_LOG = os.getenv("CUSTOM_INSTS_SUMMARIZE_LOG")
+CUSTOM_INSTS_TOML_PATH = os.getenv("CUSTOM_INSTS_TOML_PATH")
 
 # True: local LLM, False: Gemini
 USE_LOCAL_LLM = os.getenv("USE_LOCAL_LLM", "False").lower() == "true"
+
+# load toml file
+custom_insts_toml = toml.load(CUSTOM_INSTS_TOML_PATH)
+SYSTEM_PROMPT = custom_insts_toml["system_prompt"]
+
+# print configurations
+print("Configurations:")
+print("GOOGLE_API_KEY=***************************")
+print(f"GOOGLE_MODEL={GOOGLE_MODEL}")
+print(f"LOCAL_MODEL={LOCAL_MODEL}")
+print(f"LOCAL_BASE_URL={LOCAL_BASE_URL}")
+print(f"CUSTOM_INSTS_TOML_PATH={CUSTOM_INSTS_TOML_PATH}")
+print(f"USE_LOCAL_LLM={USE_LOCAL_LLM}")
+print(f"\nLoaded toml: {custom_insts_toml}")
 
 
 @asynccontextmanager
@@ -77,7 +91,7 @@ def format_docs(docs):
 # build RAG chain with retrievers
 tweet_prompt = ChatPromptTemplate.from_messages(
     [
-        ("system", CUSTOM_INSTS_TWEET),
+        ("system", SYSTEM_PROMPT),
         (
             "user",
             "Current log: {log}\n\nSimilar past logs:\n{past_logs}\n\nSimilar past reactions:\n{past_tweets}",
