@@ -10,7 +10,7 @@ A reverse proxy server. It acts as a gateway, forwarding requests between the fr
 
 ```bash
 cd engi
-go run main.go
+go run main.go --config ../config.toml
 ```
 
 ## shiki ("識")
@@ -22,7 +22,7 @@ Generates emotional text using LLMs based on system data, transforming technical
 ```bash
 cd shiki
 uv sync
-uv run src/main.py
+uv run src/main.py -- ../config.toml
 ```
 
 ## zen ("禅")

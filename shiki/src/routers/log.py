@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
 from db import DataBase
 
 router = APIRouter(prefix="/log", tags=["log"])

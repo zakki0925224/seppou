@@ -1,43 +1,61 @@
+import argparse
+import os
+from contextlib import asynccontextmanager
+
+import toml
+import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from dotenv import load_dotenv
-from llm import create_llm_interface
+
 from db import DataBase
+from llm import create_llm_interface
 from routers.debug import create_debug_router
 from routers.log import router as log_router
 from routers.tweet import router as tweet_router
 from schedules.tweet import start_tweet_scheduler, stop_tweet_scheduler
-import uvicorn
-import os
-import toml
 
-load_dotenv()
+arg_parser = argparse.ArgumentParser()
+arg_parser.add_argument("config", help="Path to config file")
+
+args = arg_parser.parse_args()
+config = toml.load(args.config)
+
+load_dotenv(dotenv_path=config["shiki"]["dotenv_path"])
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL")
-LOCAL_MODEL = os.getenv("LOCAL_MODEL")
-LOCAL_BASE_URL = os.getenv("LOCAL_BASE_URL")
-CUSTOM_INSTS_TOML_PATH = os.getenv("CUSTOM_INSTS_TOML_PATH")
+HOST = config["shiki"]["host"]
+PORT = config["shiki"]["port"]
+GOOGLE_MODEL = config["shiki"]["google_model"]
+LOCAL_MODEL = config["shiki"]["local_model"]
+LOCAL_BASE_URL = config["shiki"]["local_base_url"]
+CUSTOM_INST_CONFIG_PATH = config["shiki"]["custom_inst_config_path"]
 
-# True: local LLM, False: Gemini
-USE_LOCAL_LLM = os.getenv("USE_LOCAL_LLM", "False").lower() == "true"
+# True: local Model, False: Gemini
+USE_LOCAL_MODEL = config["shiki"]["use_local_model"] == "true"
+
+DB_PATH = config["shiki"]["db_path"]
+CHROMA_PATH = config["shiki"]["chroma_path"]
 
 # load toml file
-custom_insts_toml = toml.load(CUSTOM_INSTS_TOML_PATH)
-SYSTEM_PROMPT = custom_insts_toml["system_prompt"]
+custom_inst_toml = toml.load(CUSTOM_INST_CONFIG_PATH)
+SYSTEM_PROMPT = custom_inst_toml["system_prompt"]
 
 # print configurations
 print("Configurations:")
+print(f"HOST={HOST}")
+print(f"PORT={PORT}")
 print("GOOGLE_API_KEY=***************************")
 print(f"GOOGLE_MODEL={GOOGLE_MODEL}")
 print(f"LOCAL_MODEL={LOCAL_MODEL}")
 print(f"LOCAL_BASE_URL={LOCAL_BASE_URL}")
-print(f"CUSTOM_INSTS_TOML_PATH={CUSTOM_INSTS_TOML_PATH}")
-print(f"USE_LOCAL_LLM={USE_LOCAL_LLM}")
-print(f"\nLoaded toml: {custom_insts_toml}")
+print(f"CUSTOM_INST_CONFIG_PATH={CUSTOM_INST_CONFIG_PATH}")
+print(f"USE_LOCAL_MODEL={USE_LOCAL_MODEL}")
+print(f"DB_PATH={DB_PATH}")
+print(f"CHROMA_PATH={CHROMA_PATH}")
+print(f"\nLoaded toml: {custom_inst_toml}")
 
 
 @asynccontextmanager
@@ -72,10 +90,10 @@ llm = create_llm_interface(
     google_model=GOOGLE_MODEL,
     local_base_url=LOCAL_BASE_URL,
     local_model=LOCAL_MODEL,
-    use_local_llm=USE_LOCAL_LLM,
+    use_local_model=USE_LOCAL_MODEL,
 )
 
-app.state.db = DataBase(db_path="db.json")
+app.state.db = DataBase(db_path=DB_PATH, chroma_path=CHROMA_PATH)
 
 # create retrievers for RAG
 log_retriever = app.state.db.get_log_retriever(k=3)
@@ -116,4 +134,4 @@ app.include_router(log_router)
 app.include_router(tweet_router)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="localhost", port=8000)
+    uvicorn.run(app, host=HOST, port=PORT)

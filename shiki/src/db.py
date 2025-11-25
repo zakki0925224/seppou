@@ -1,12 +1,13 @@
+from datetime import datetime
+from typing import Dict, List, Optional
+
+import chromadb
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from pydantic import Field
 from tinydb import TinyDB
 from tinydb.storages import MemoryStorage
-from datetime import datetime
-from typing import Dict, Optional, List
-from langchain_core.retrievers import BaseRetriever
-from langchain_core.documents import Document
-from langchain_core.callbacks import CallbackManagerForRetrieverRun
-from pydantic import Field
-import chromadb
 
 
 class LogRetriever(BaseRetriever):
@@ -80,11 +81,8 @@ class TweetRetriever(BaseRetriever):
 
 
 class DataBase:
-    def __init__(self, db_path: Optional[str] = None, chroma_path: str = "./chroma_db"):
-        if db_path is not None:
-            self.db = TinyDB(db_path)
-        else:
-            self.db = TinyDB(storage=MemoryStorage)
+    def __init__(self, db_path: str, chroma_path: str):
+        self.db = TinyDB(db_path)
 
         self.logs = self.db.table("logs")
         self.tweets = self.db.table("tweets")

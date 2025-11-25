@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from langserve import add_routes
 from langchain_core.runnables import Runnable
+from langserve import add_routes
 
 
 def create_debug_router(llm: Runnable) -> APIRouter:
