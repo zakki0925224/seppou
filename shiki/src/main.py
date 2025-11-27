@@ -1,6 +1,8 @@
 import argparse
 import os
+import sys
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import toml
 import uvicorn
@@ -25,7 +27,7 @@ args = arg_parser.parse_args()
 config = toml.load(args.config)
 
 load_dotenv(dotenv_path=config["shiki"]["dotenv_path"])
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 HOST = config["shiki"]["host"]
 PORT = config["shiki"]["port"]
 GOOGLE_MODEL = config["shiki"]["google_model"]
@@ -34,7 +36,7 @@ LOCAL_BASE_URL = config["shiki"]["local_base_url"]
 CUSTOM_INST_CONFIG_PATH = config["shiki"]["custom_inst_config_path"]
 
 # True: local Model, False: Gemini
-USE_LOCAL_MODEL = config["shiki"]["use_local_model"] == "true"
+USE_LOCAL_MODEL = config["shiki"]["use_local_model"]
 
 DB_PATH = config["shiki"]["db_path"]
 CHROMA_PATH = config["shiki"]["chroma_path"]
@@ -42,6 +44,18 @@ CHROMA_PATH = config["shiki"]["chroma_path"]
 # load toml file
 custom_inst_toml = toml.load(CUSTOM_INST_CONFIG_PATH)
 SYSTEM_PROMPT = custom_inst_toml["system_prompt"]
+
+# API key check
+if GOOGLE_API_KEY == "":
+    print("GOOGLE_API_KEY is not defined in .env")
+    sys.exit(0)
+
+# parse host name
+parsed = urlparse(HOST)
+if parsed.scheme:
+    HOSTNAME = parsed.hostname or HOST
+else:
+    HOSTNAME = HOST
 
 # print configurations
 print("Configurations:")
@@ -134,4 +148,4 @@ app.include_router(log_router)
 app.include_router(tweet_router)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT)
+    uvicorn.run(app, host=HOSTNAME, port=PORT)
