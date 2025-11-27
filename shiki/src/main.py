@@ -11,7 +11,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
 
 from db import DataBase
 from llm import create_llm_interface
@@ -41,6 +40,9 @@ USE_LOCAL_MODEL = config["shiki"]["use_local_model"]
 DB_PATH = config["shiki"]["db_path"]
 CHROMA_PATH = config["shiki"]["chroma_path"]
 
+TWEET_GENERATION_INTERVAL_SEC = config["shiki"]["tweet_generation_interval_sec"]
+MODEL_MAX_CONTEXT_LENGTH = config["shiki"]["model_max_context_length"]
+
 # load toml file
 custom_inst_toml = toml.load(CUSTOM_INST_CONFIG_PATH)
 SYSTEM_PROMPT = custom_inst_toml["system_prompt"]
@@ -69,13 +71,20 @@ print(f"CUSTOM_INST_CONFIG_PATH={CUSTOM_INST_CONFIG_PATH}")
 print(f"USE_LOCAL_MODEL={USE_LOCAL_MODEL}")
 print(f"DB_PATH={DB_PATH}")
 print(f"CHROMA_PATH={CHROMA_PATH}")
+print(f"TWEET_GENERATION_INTERVAL_SEC={TWEET_GENERATION_INTERVAL_SEC}")
+print(f"MODEL_MAX_CONTEXT_LENGTH={MODEL_MAX_CONTEXT_LENGTH}")
 print(f"\nLoaded toml: {custom_inst_toml}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup
-    start_tweet_scheduler(app.state.db, tweet_chain)
+    start_tweet_scheduler(
+        app.state.db,
+        tweet_chain,
+        TWEET_GENERATION_INTERVAL_SEC,
+        MODEL_MAX_CONTEXT_LENGTH,
+    )
 
     yield
 
@@ -109,18 +118,6 @@ llm = create_llm_interface(
 
 app.state.db = DataBase(db_path=DB_PATH, chroma_path=CHROMA_PATH)
 
-# create retrievers for RAG
-log_retriever = app.state.db.get_log_retriever(k=3)
-tweet_retriever = app.state.db.get_tweet_retriever(k=3)
-
-
-def format_docs(docs):
-    if not docs:
-        return "No similar past data found."
-    return "\n\n".join([f"- {doc.page_content}" for doc in docs])
-
-
-# build RAG chain with retrievers
 tweet_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", SYSTEM_PROMPT),
@@ -131,16 +128,7 @@ tweet_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-tweet_chain = (
-    {
-        "log": RunnablePassthrough(),
-        "past_logs": log_retriever | format_docs,
-        "past_tweets": tweet_retriever | format_docs,
-    }
-    | tweet_prompt
-    | llm
-    | StrOutputParser()
-)
+tweet_chain = tweet_prompt | llm | StrOutputParser()
 
 debug_router = create_debug_router(llm)
 app.include_router(debug_router)
