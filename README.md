@@ -10,7 +10,7 @@ A reverse proxy server. It acts as a gateway, forwarding requests between the fr
 
 ```bash
 cd engi
-go run main.go --config ../config.toml
+go run . --config ../config.toml
 ```
 
 ## shiki ("識")

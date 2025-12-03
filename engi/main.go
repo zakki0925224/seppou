@@ -18,8 +18,9 @@ type Config struct {
 }
 
 type EngiConfig struct {
-	Host string `toml:"host"`
-	Port int    `toml:"port"`
+	Host          string `toml:"host"`
+	Port          int    `toml:"port"`
+	MaxReqsPerSec int    `toml:"max_reqs_per_sec"`
 }
 
 type ShikiConfig struct {
@@ -61,19 +62,24 @@ func main() {
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(url)
-	proxy.Director = func(req *http.Request) {
-		req.URL.Scheme = url.Scheme
-		req.URL.Host = url.Host
-		req.Host = url.Host
+
+	// limiter
+	limiter := NewRateLimiter(cfg.Engi.MaxReqsPerSec)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !limiter.Allow() {
+			log.Printf("Rate limit exceeded for request: %s %s", req.Method, req.URL.Path)
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
 
 		log.Printf("Transporting request: %s %s", req.Method, req.URL.Path)
-	}
+		proxy.ServeHTTP(w, req)
+	})
 
-	log.Printf("Starting Engi proxy on port %s, forwarding to %s", engiUrl, shikiUrl)
+	log.Printf("Starting Engi proxy on %s, forwarding to %s", engiUrl, shikiUrl)
 
-	http.HandleFunc("/", proxy.ServeHTTP)
-
-	if err := http.ListenAndServe(engiUrl, nil); err != nil {
+	if err := http.ListenAndServe(engiUrl, handler); err != nil {
 		panic(err)
 	}
 }
