@@ -1,7 +1,11 @@
+import json
+import re
 import time
 
 import tiktoken
 from apscheduler.schedulers.background import BackgroundScheduler
+from drain3 import TemplateMiner
+from drain3.template_miner_config import TemplateMinerConfig
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.runnables import Runnable
 
@@ -9,6 +13,13 @@ from db import DataBase
 
 scheduler = BackgroundScheduler()
 encoding = tiktoken.get_encoding("cl100k_base")
+
+config = TemplateMinerConfig()
+config.profiling_depth = 5
+config.similarity_threshold = 0.6
+config.max_children = 100
+
+template_miner = TemplateMiner(config=config)
 
 
 class PromptCaptureCallback(BaseCallbackHandler):
@@ -23,8 +34,62 @@ callback = PromptCaptureCallback()
 
 
 def calculate_tokens(text: str) -> int:
-    """Calculate the number of tokens in a text."""
     return len(encoding.encode(text))
+
+
+def compress_logs_with_drain(logs: list) -> str:
+    all_messages = []
+    for log in logs:
+        content = log.get("log", "")
+        try:
+            log_json = json.loads(content)
+            if isinstance(log_json, list):
+                all_messages.extend([str(item) for item in log_json])
+            elif isinstance(log_json, dict):
+                all_messages.append(json.dumps(log_json, sort_keys=True))
+            else:
+                all_messages.append(str(log_json))
+        except json.JSONDecodeError:
+            all_messages.append(content)
+
+    template_counts = {}
+    template_samples = {}
+
+    for message in all_messages:
+        normalized = message
+        normalized = re.sub(r"0x[0-9a-fA-F]+", "<HEX>", normalized)
+        normalized = re.sub(r"\b\d{2,}\b", "<NUM>", normalized)
+        normalized = re.sub(r"\br\d+\b", "<REG>", normalized)
+        result = template_miner.add_log_message(normalized)
+
+        if result:
+            template = result["template_mined"]
+            template_counts[template] = template_counts.get(template, 0) + 1
+            if template not in template_samples:
+                template_samples[template] = message
+
+    sorted_templates = sorted(template_counts.items(), key=lambda x: x[1], reverse=True)
+
+    total_messages = len(all_messages)
+    compressed_logs = [
+        f"Summary of {total_messages} execution logs (Grouped by similarity):"
+    ]
+
+    for template, count in sorted_templates[:15]:
+        percentage = (count / total_messages) * 100
+        sample = template_samples.get(template, "N/A")
+        line = f"- Repeated {count} times ({percentage:.1f}%): {template}\n  Example: {sample}"
+        compressed_logs.append(line)
+
+    if len(sorted_templates) > 15:
+        remaining = len(sorted_templates) - 15
+        total_remaining = sum(count for _, count in sorted_templates[15:])
+        remaining_pct = (total_remaining / total_messages) * 100
+        compressed_logs.append(
+            f"... and {remaining} other minor patterns ({total_remaining}x, {remaining_pct:.1f}%)"
+        )
+
+    return "\n".join(compressed_logs)
 
 
 def generate_tweet_from_latest_log(
@@ -39,38 +104,28 @@ def generate_tweet_from_latest_log(
     reserved_tokens = 1000
     available_tokens = model_max_context_length - reserved_tokens
 
-    # Build the current log content
-    formatted_logs = []
-    log_tokens = 0
+    compressed_log = compress_logs_with_drain(latest_logs)
+    log_tokens = calculate_tokens(compressed_log)
 
-    for log in reversed(latest_logs):
-        content = log.get("log", "")
-        tokens = calculate_tokens(content)
+    print(f"Compressed {len(latest_logs)} logs to {log_tokens} tokens")
+    print(f'Compressed log: "{compressed_log}"')
 
-        if log_tokens + tokens > available_tokens:
-            break
+    if log_tokens > available_tokens:
+        tokens = encoding.encode(compressed_log)
+        truncated_tokens = tokens[:available_tokens]
+        compressed_log = encoding.decode(truncated_tokens)
+        log_tokens = available_tokens
 
-        formatted_logs.append(content)
-        log_tokens += tokens
+    log_retriever = db.get_log_retriever(k=3)
+    tweet_retriever = db.get_tweet_retriever(k=3)
 
-    formatted_logs.reverse()
-    current_log = "\n".join(formatted_logs)
+    past_log_docs = log_retriever.invoke(compressed_log)
+    past_tweet_docs = tweet_retriever.invoke(compressed_log)
 
-    # Get RAG data with token-aware trimming
-    log_retriever = db.get_log_retriever(k=10)  # Get more candidates
-    tweet_retriever = db.get_tweet_retriever(k=10)  # Get more candidates
-
-    past_log_docs = log_retriever.invoke(current_log)
-    past_tweet_docs = tweet_retriever.invoke(current_log)
-
-    # Calculate remaining tokens after current log
     remaining_tokens = available_tokens - log_tokens
-
-    # Allocate tokens: 50% for past logs, 50% for past tweets
     past_logs_budget = remaining_tokens // 2
     past_tweets_budget = remaining_tokens - past_logs_budget
 
-    # Trim past logs to fit budget
     past_logs_content = []
     past_logs_tokens = 0
     for doc in past_log_docs:
@@ -81,7 +136,6 @@ def generate_tweet_from_latest_log(
         past_logs_content.append(content)
         past_logs_tokens += tokens
 
-    # Trim past tweets to fit budget
     past_tweets_content = []
     past_tweets_tokens = 0
     for doc in past_tweet_docs:
@@ -92,7 +146,6 @@ def generate_tweet_from_latest_log(
         past_tweets_content.append(content)
         past_tweets_tokens += tokens
 
-    # Format the final past data
     past_logs_text = (
         "\n".join(past_logs_content)
         if past_logs_content
@@ -114,7 +167,7 @@ def generate_tweet_from_latest_log(
         start = time.perf_counter_ns()
         tweet = tweet_llm_chain.invoke(
             {
-                "log": current_log,
+                "log": compressed_log,
                 "past_logs": past_logs_text,
                 "past_tweets": past_tweets_text,
             },
