@@ -36,3 +36,14 @@ cd zen
 bun install
 bun start
 ```
+
+## GUI Manager
+
+A graphical user interface to manage the `seppou` system components.
+
+### Usage
+
+```bash
+
+python3 gui_manager.py
+```
