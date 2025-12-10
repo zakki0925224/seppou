@@ -1,6 +1,6 @@
 [engi]
 host = "localhost"
-port = 8080
+port = 8203
 max_reqs_per_sec = 2
 
 [shiki]
@@ -10,12 +10,12 @@ custom_inst_config_path = "../custom_insts/16bit-cpu.toml"
 dotenv_path = "../.env" # need for "google_api_key"
 google_api_key = "READ_FROM_DOTENV" # key: "GOOGLE_API_KEY"
 google_model = "gemini-2.5-flash"
-local_model = "liquid/lfm2-1.2b"
+local_model = "gemma-2-baku-2b-it"
 local_base_url = "http://127.0.0.1:1234/v1"
 use_local_model = true
 db_path = "../db.json"
 chroma_path = "../chroma_db"
-tweet_generation_interval_sec = 20
+tweet_generation_interval_sec = 60
 model_max_context_length = 4096
 
 [zen]
