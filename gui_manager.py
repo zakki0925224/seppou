@@ -1,17 +1,24 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-import subprocess
-import threading
+import atexit
+import os
 import queue
-from pathlib import Path
-from enum import Enum
-from typing import Optional, Dict
 import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import tkinter as tk
+from enum import Enum
+from pathlib import Path
+from tkinter import messagebox, scrolledtext, ttk
+from typing import Dict, Optional
 
 
 class ServiceStatus(Enum):
     STOPPED = "Stopped"
+    STARTING = "Starting"
     RUNNING = "Running"
+    STOPPING = "Stopping"
     ERROR = "Error"
 
 
@@ -24,65 +31,189 @@ class ServiceProcess:
         self.status = ServiceStatus.STOPPED
         self.log_queue = queue.Queue()
         self.reader_thread: Optional[threading.Thread] = None
+        self.stop_lock = threading.Lock()
+        self.is_stopping = False
 
     def start(self) -> bool:
-        if self.process and self.process.poll() is None:
-            return False
+        """Start the process"""
+        with self.stop_lock:
+            # Do nothing if already running
+            if self.process and self.process.poll() is None:
+                return False
 
-        try:
-            self.process = subprocess.Popen(
-                self.command,
-                cwd=self.cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+            # Wait if stop is in progress
+            if self.is_stopping:
+                self.log_queue.put(f"[{self.name}] Waiting for stop to complete...\n")
+                return False
 
-            self.reader_thread = threading.Thread(target=self._read_output, daemon=True)
-            self.reader_thread.start()
+            try:
+                self.status = ServiceStatus.STARTING
 
-            self.status = ServiceStatus.RUNNING
-            return True
-        except Exception as e:
-            self.status = ServiceStatus.ERROR
-            self.log_queue.put(f"Start error: {e}\n")
-            return False
+                # Clean up previous resources
+                self._cleanup_resources()
+
+                # Create process group and start (for Linux)
+                if os.name == "posix":
+                    self.process = subprocess.Popen(
+                        self.command,
+                        cwd=self.cwd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        start_new_session=True,  # Create new process group
+                    )
+                else:
+                    self.process = subprocess.Popen(
+                        self.command,
+                        cwd=self.cwd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                        if os.name == "nt"
+                        else 0,
+                    )
+
+                # Start output reading thread
+                self.reader_thread = threading.Thread(
+                    target=self._read_output, daemon=True, name=f"{self.name}_reader"
+                )
+                self.reader_thread.start()
+
+                self.status = ServiceStatus.RUNNING
+                self.log_queue.put(f"[{self.name}] Started (PID: {self.process.pid})\n")
+                return True
+
+            except Exception as e:
+                self.status = ServiceStatus.ERROR
+                self.log_queue.put(f"[{self.name}] Start error: {e}\n")
+                self._cleanup_resources()
+                return False
 
     def stop(self) -> bool:
+        """Stop the process (asynchronous)"""
         if not self.process or self.process.poll() is not None:
+            self.status = ServiceStatus.STOPPED
             return False
 
-        try:
-            self.process.terminate()
-            self.process.wait(timeout=5)
-            self.status = ServiceStatus.STOPPED
-            return True
-        except subprocess.TimeoutExpired:
-            self.process.kill()
-            self.status = ServiceStatus.STOPPED
-            return True
-        except Exception as e:
-            self.log_queue.put(f"Stop error: {e}\n")
+        # Do nothing if already stopping
+        if self.is_stopping:
             return False
+
+        self.status = ServiceStatus.STOPPING
+        self.is_stopping = True
+
+        # Execute stop process in thread
+        stop_thread = threading.Thread(
+            target=self._stop_process_internal,
+            daemon=False,  # daemon=False to ensure complete shutdown
+            name=f"{self.name}_stopper",
+        )
+        stop_thread.start()
+        return True
+
+    def _stop_process_internal(self):
+        """Internal process stop implementation"""
+        with self.stop_lock:
+            try:
+                if not self.process:
+                    return
+
+                pid = self.process.pid
+                self.log_queue.put(f"[{self.name}] Stopping (PID: {pid})...\n")
+
+                # Send termination signal to entire process group
+                if os.name == "posix":
+                    try:
+                        # Send SIGTERM to process group
+                        os.killpg(os.getpgid(pid), signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    self.process.terminate()
+
+                # Wait for termination
+                try:
+                    self.process.wait(timeout=3)
+                    self.log_queue.put(f"[{self.name}] Stopped gracefully\n")
+                except subprocess.TimeoutExpired:
+                    # Force kill
+                    self.log_queue.put(f"[{self.name}] Force killing...\n")
+                    if os.name == "posix":
+                        try:
+                            os.killpg(os.getpgid(pid), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        self.process.kill()
+
+                    self.process.wait(timeout=2)
+                    self.log_queue.put(f"[{self.name}] Force killed\n")
+
+                # Wait a bit for port to be released
+                time.sleep(0.5)
+
+            except Exception as e:
+                self.log_queue.put(f"[{self.name}] Stop error: {e}\n")
+            finally:
+                self._cleanup_resources()
+                self.status = ServiceStatus.STOPPED
+                self.is_stopping = False
+
+    def _cleanup_resources(self):
+        """Clean up resources"""
+        # Close stdout
+        if self.process and self.process.stdout:
+            try:
+                self.process.stdout.close()
+            except:
+                pass
+
+        # Wait for reader_thread to finish (short timeout)
+        if self.reader_thread and self.reader_thread.is_alive():
+            self.reader_thread.join(timeout=1.0)
+
+        self.process = None
+        self.reader_thread = None
 
     def is_running(self) -> bool:
+        """Check if process is running"""
         if self.process and self.process.poll() is None:
             return True
         if self.process and self.process.poll() is not None:
-            self.status = ServiceStatus.STOPPED
+            if self.status == ServiceStatus.RUNNING:
+                self.status = ServiceStatus.STOPPED
         return False
 
     def _read_output(self):
+        """Read process output"""
         if not self.process or not self.process.stdout:
             return
 
-        for line in iter(self.process.stdout.readline, ""):
-            if line:
-                self.log_queue.put(line)
+        try:
+            while True:
+                # Check if process has terminated
+                if not self.process or self.process.poll() is not None:
+                    break
 
-        if self.process.poll() is not None:
-            self.status = ServiceStatus.STOPPED
+                try:
+                    line = self.process.stdout.readline()
+                    if not line:
+                        break
+                    self.log_queue.put(line)
+                except (ValueError, OSError):
+                    break
+
+        except Exception as e:
+            self.log_queue.put(f"[{self.name}] Reader error: {e}\n")
+        finally:
+            # Update status when thread exits
+            if self.process and self.process.poll() is not None:
+                if self.status == ServiceStatus.RUNNING:
+                    self.status = ServiceStatus.STOPPED
+                    self.log_queue.put(f"[{self.name}] Process exited\n")
 
 
 class ManagerGUI:
@@ -134,7 +265,7 @@ class ManagerGUI:
 
             status_var = tk.StringVar(value=service.status.value)
             self.status_labels[name] = status_var
-            status_label = ttk.Label(status_frame, textvariable=status_var, width=10)
+            status_label = ttk.Label(status_frame, textvariable=status_var, width=12)
             status_label.grid(row=idx, column=1, padx=5, pady=5)
 
             pid_var = tk.StringVar(value="")
@@ -205,15 +336,11 @@ class ManagerGUI:
     def _start_service(self, name: str):
         service = self.services[name]
         if service.start():
-            self.log_widgets[name].insert(tk.END, f"[{name}] Started\n")
-            self.log_widgets[name].see(tk.END)
             self._update_button_state(name)
 
     def _stop_service(self, name: str):
         service = self.services[name]
         if service.stop():
-            self.log_widgets[name].insert(tk.END, f"[{name}] Stopped\n")
-            self.log_widgets[name].see(tk.END)
             self._update_button_state(name)
 
     def _start_all(self):
@@ -256,15 +383,22 @@ class ManagerGUI:
         service = self.services[name]
         buttons = self.control_buttons[name]
 
-        if service.is_running():
+        if service.status == ServiceStatus.RUNNING:
             buttons["start"].config(state=tk.DISABLED)
             buttons["stop"].config(state=tk.NORMAL)
+        elif service.status == ServiceStatus.STOPPING:
+            buttons["start"].config(state=tk.DISABLED)
+            buttons["stop"].config(state=tk.DISABLED)
+        elif service.status == ServiceStatus.STARTING:
+            buttons["start"].config(state=tk.DISABLED)
+            buttons["stop"].config(state=tk.DISABLED)
         else:
             buttons["start"].config(state=tk.NORMAL)
             buttons["stop"].config(state=tk.DISABLED)
 
     def _update_logs(self):
         for name, service in self.services.items():
+            # Retrieve and display logs
             while not service.log_queue.empty():
                 try:
                     log_line = service.log_queue.get_nowait()
@@ -273,20 +407,39 @@ class ManagerGUI:
                 except queue.Empty:
                     break
 
+            # Update status and PID
             if service.is_running():
                 service.status = ServiceStatus.RUNNING
                 if service.process:
                     self.pid_labels[name].set(f"PID: {service.process.pid}")
             else:
-                self.pid_labels[name].set("")
+                if service.status not in [
+                    ServiceStatus.STOPPING,
+                    ServiceStatus.STARTING,
+                ]:
+                    self.pid_labels[name].set("")
+
             self.status_labels[name].set(service.status.value)
             self._update_button_state(name)
 
         self.root.after(100, self._update_logs)
 
     def cleanup(self):
+        """Cleanup on application exit"""
         for service in self.services.values():
-            service.stop()
+            if service.is_running():
+                service.stop()
+
+        # Wait a bit for all services to stop
+        max_wait = 50  # 5 seconds
+        for _ in range(max_wait):
+            all_stopped = all(
+                not service.is_running() and not service.is_stopping
+                for service in self.services.values()
+            )
+            if all_stopped:
+                break
+            time.sleep(0.1)
 
 
 def main():
@@ -297,7 +450,21 @@ def main():
         app.cleanup()
         root.destroy()
 
+    # Handle window close button
     root.protocol("WM_DELETE_WINDOW", on_closing)
+
+    # Handle Ctrl+C and kill signals
+    def signal_handler(signum, frame):
+        print(f"\nReceived signal {signum}, cleaning up...")
+        app.cleanup()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Register cleanup for atexit (catches most exit scenarios)
+    atexit.register(app.cleanup)
+
     root.mainloop()
 
 
